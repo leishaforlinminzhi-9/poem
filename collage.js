@@ -53,7 +53,9 @@ export function look(t) {
 
 const EPOCH = Date.UTC(2020, 0, 1);
 export function encode(tiles, at) {
-  const d = Math.max(0, Math.round((at - EPOCH) / 86400000));
+  // the day as it is where the poem was made (a poem stuck together late on the 31st is a poem of the 31st)
+  const local = new Date(at);
+  const d = Math.max(0, Math.round((Date.UTC(local.getFullYear(), local.getMonth(), local.getDate()) - EPOCH) / 86400000));
   const bytes = [1, d >> 8, d & 255];
   for (const t of tiles) {
     const units = t.t.slice(0, 15);
