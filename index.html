@@ -58,13 +58,13 @@
   .board .hint[hidden] { display: none; }
   .board .hint { position: absolute; inset: 0; display: grid; place-items: center; color: #b8a88f; font-size: 15px; text-align: center; padding: 20px; pointer-events: none; }
   .tray { width: 100%; max-width: 760px; flex: 1; min-height: 0; display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center;
-    gap: 8px 6px; padding: 6px 2px; overflow-y: auto; touch-action: pan-y; }
+    gap: 6px; padding: 4px 2px; overflow-y: auto; touch-action: pan-y; }
 
   /* a word cut out of a magazine */
   .tile { position: absolute; left: 0; top: 0; white-space: nowrap; line-height: 1; touch-action: none; cursor: grab;
     filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.28)); }
   .tray .tile { position: relative; }
-  .tray .stock { width: 100%; display: flex; justify-content: center; gap: 6px; padding-bottom: 6px; margin-bottom: 2px; border-bottom: 1px dashed rgba(42,35,32,.18); }
+  .tray .stock { width: 100%; display: flex; justify-content: center; gap: 6px; padding-bottom: 5px; margin-bottom: 1px; border-bottom: 1px dashed rgba(42,35,32,.18); }
   .tile .cut { display: block; }
   .tile .tape { position: absolute; height: 34%; width: 46%; min-width: 16px; top: -14%; opacity: .78; pointer-events: none; }
   .tile.mine-0 .tape { background: var(--her); }

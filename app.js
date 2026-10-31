@@ -265,7 +265,7 @@ function layout() {
   if (!$('play').classList.contains('on')) return;
   const play = $('play'), cs = getComputedStyle(play);
   const used = play.querySelector('.bar').offsetHeight + 8 + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-  const availH = innerHeight - used - 200; // 200: room for the punctuation row and the pile of words
+  const availH = innerHeight - used - 225; // 225: room for the punctuation row and up to four rows of words
   K = Math.min((innerWidth - 16) / BW, availH / BH, 0.9);
   $('board').style.width = `${BW * K}px`;
   $('board').style.height = `${BH * K}px`;
