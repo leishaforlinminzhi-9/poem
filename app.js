@@ -4,7 +4,8 @@
 import { WORDS, MIX, FLAVOR, REUSE, ALWAYS } from './words.js';
 import { BW, BH, STYLES, PUNCT, look, encode, decode, poemText, render, day } from './collage.js';
 
-const API = new URLSearchParams(location.search).get('api') || 'https://love-calendar-api.linmz21.workers.dev';
+// the Netlify front door first: *.workers.dev cannot be reached from mainland China, the Netlify address forwards to it
+const APIS = new URLSearchParams(location.search).get('api')?.split(',') ?? ['https://frabjous-boba-2c325c.netlify.app', 'https://love-calendar-api.linmz21.workers.dev'];
 const WHO = [
   { name: '小狗', cls: 'dog', pron: '她', tape: '#f19bb8' },
   { name: '小猫', cls: 'cat', pron: '他', tape: '#8fb0cf' },
@@ -334,10 +335,20 @@ function unpin() {
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+let apiAt = 0; // the address that answered last time is tried first
 async function api(body) {
-  const res = await fetch(`${API}/api/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  let last;
+  for (let i = 0; i < APIS.length; i++) {
+    const k = (apiAt + i) % APIS.length;
+    try {
+      const res = await fetch(`${APIS[k]}/api/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const out = await res.json();
+      apiAt = k;
+      return out;
+    } catch (err) { last = err; }
+  }
+  throw last;
 }
 function openCal() {
   $('calDate').value = todayKey();
@@ -345,42 +356,78 @@ function openCal() {
   $('calGo').disabled = false;
   $('calSheet').classList.add('on');
 }
+const textOf = (item) => {
+  const link = linkOf(item.code);
+  // the calendar keeps at most 600 characters of a 回音; the link must survive whole
+  return `${item.text.slice(0, 600 - link.length - 2)}\n\n${link}`;
+};
+// Hangs every poem in `jobs` ({ item, date }) as a 回音 in the first free slot of its date, all in one sync.
+// Returns { done: Map code -> date (hung now or found already hung), full: [items whose day had no free slot] }.
+async function hangAll(jobs) {
+  const done = new Map();
+  let full = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const all = await api({ changes: [] });
+    const live = new Map(all.entries.map((e) => [e.id, e]));
+    const changes = [];
+    const want = new Map();
+    full = [];
+    const now = Date.now();
+    for (const { item, date } of jobs) {
+      if (done.has(item.code)) continue;
+      const already = all.entries.find((e) => !e.deleted && e.text.includes(`#p=${item.code}`));
+      if (already) { done.set(item.code, already.date); continue; }
+      let slot = -1;
+      for (let s = 0; s < 6 && slot < 0; s++) if ((!live.get(`${date}_${s}`) || live.get(`${date}_${s}`).deleted) && !want.has(`${date}_${s}`)) slot = s;
+      if (slot < 0) { full.push(item); continue; }
+      const id = `${date}_${slot}`;
+      want.set(id, item);
+      changes.push({ date, slot, kind: 'love', type: 'poem', text: textOf(item), createdAt: now, updatedAt: now, deleted: false, baseRev: live.get(id)?.rev ?? 0 });
+    }
+    if (!changes.length) return { done, full };
+    const res = await api({ epoch: all.epoch, since: all.cursor, changes });
+    for (const [id, item] of want) if (res.entries.some((e) => e.id === id && e.text.includes(item.code))) done.set(item.code, id.slice(0, 10));
+    if (jobs.every(({ item }) => done.has(item.code) || full.includes(item))) return { done, full };
+    // a slot was written by someone else just now: look again
+  }
+  throw new Error('not stored');
+}
+function rememberHung(done) {
+  ls.set('poem-wall', wallLocal().map((w) => (done.has(w.code) ? { ...w, onCal: done.get(w.code) } : w)));
+}
 async function hang() {
   const date = $('calDate').value;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return ($('calMsg').textContent = '先选一天');
   $('calGo').disabled = true;
   $('calMsg').textContent = '正在挂……';
   try {
-    const link = linkOf(current.code);
-    // the calendar keeps at most 600 characters of a 回音; the link must survive whole
-    const text = `${current.text.slice(0, 600 - link.length - 2)}\n\n${link}`;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const all = await api({ changes: [] });
-      const live = new Map(all.entries.map((e) => [e.id, e]));
-      const already = all.entries.find((e) => !e.deleted && e.text.includes(`#p=${current.code}`));
-      if (already) return markHung(already.date, '这首已经挂过了');
-      let slot = -1;
-      for (let s = 0; s < 6 && slot < 0; s++) if (!live.get(`${date}_${s}`) || live.get(`${date}_${s}`).deleted) slot = s;
-      if (slot < 0) return ($('calMsg').textContent = '这一天已经挂满了,换一天吧', $('calGo').disabled = false);
-      const now = Date.now();
-      const id = `${date}_${slot}`;
-      const res = await api({
-        epoch: all.epoch, since: all.cursor,
-        changes: [{ date, slot, kind: 'love', type: 'poem', text, createdAt: now, updatedAt: now, deleted: false, baseRev: live.get(id)?.rev ?? 0 }],
-      });
-      if (res.conflicts?.includes(id)) continue; // someone wrote that slot just now: look again
-      if (res.entries.some((e) => e.id === id && e.text.includes(current.code))) return markHung(date);
-    }
-    throw new Error('not stored');
+    const { done } = await hangAll([{ item: current, date }]);
+    if (!done.has(current.code)) return ($('calMsg').textContent = '这一天已经挂满了,换一天吧', $('calGo').disabled = false);
+    markHung(done.get(current.code), done.get(current.code) === date ? undefined : '这首已经挂过了');
   } catch (err) {
     console.error(err);
     $('calMsg').textContent = '没挂上,可能是网不好,再试一次';
     $('calGo').disabled = false;
   }
 }
+// the day a poem was made, as the calendar writes it
+const dateOf = (item) => { const d = new Date(decode(item.code).at); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+async function hangWall(btn, list) {
+  btn.disabled = true;
+  btn.textContent = '正在挂……';
+  try {
+    const { done, full } = await hangAll(list.map((item) => ({ item, date: dateOf(item) })));
+    rememberHung(done);
+    toast(full.length ? `挂好 ${done.size} 首,有 ${full.length} 首那天已经挂满了` : `都挂好了,一共 ${done.size} 首`);
+  } catch (err) {
+    console.error(err);
+    toast('没挂上,可能是网不好,再试一次');
+  }
+  openWall();
+}
 function markHung(date, msg) {
   current.onCal = date;
-  ls.set('poem-wall', wallLocal().map((w) => (w.code === current.code ? { ...w, onCal: date } : w)));
+  rememberHung(new Map([[current.code, date]]));
   $('calSheet').classList.remove('on');
   toast(msg ?? `挂好了:${date.slice(5).replace('-', '月')}日`);
   showDone(current, { local: true });
@@ -408,6 +455,14 @@ async function openWall() {
     return;
   }
   grid.replaceChildren();
+  const left = list.filter((item) => item.local && !item.onCal);
+  if (left.length) {
+    const b = document.createElement('button');
+    b.className = 'btn hangall';
+    b.textContent = `把没挂的 ${left.length} 首按日期挂到爱的日历`;
+    b.onclick = () => hangWall(b, left);
+    grid.append(b);
+  }
   for (const item of list) {
     const b = document.createElement('button');
     b.className = 'pin';
